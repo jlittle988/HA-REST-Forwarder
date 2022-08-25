@@ -3,7 +3,7 @@ import requests, time, re
 
 # https://developers.home-assistant.io/docs/api/rest/
 
-bind_ip = "192.168.2.26"    # Address and port for this server to bind to
+bind_ip = "localhost"    # Address and port for this server to bind to
 bind_port = 8123
 
 hass_ip = "192.168.2.8"     # Address and port of Home Assistant server
@@ -14,10 +14,10 @@ hass_port = 8123
 # Can be left as None if token will be sent in query string.
 hass_token = None
 
-# Blacklist/whitelists for commands, domains and entities.
-# A '/' after a command indicates the command has parameters.
-blacklist_commands = False
-command_list = [
+# Blacklist/whitelists for actions, domains and entities.
+# A '/' after an action indicates the action has parameters.
+blacklist_actions = False
+action_list = [
 'states/',
 'services/',
 ]
@@ -39,7 +39,7 @@ class Forwarder(BaseHTTPRequestHandler):
     def do_GET(self):
         # Parse and filter request
         path, queries = self._parsePath(self.path)
-        headers = _makeHeaders(queries)
+        headers = self._makeHeaders(queries)
         final_path = self._filterPath(path)
 
         if final_path is not None:
@@ -55,7 +55,7 @@ class Forwarder(BaseHTTPRequestHandler):
         else:
             # Return filter error to original sender
             self.send_response(403)
-            self.wfile.write(bytes('Requested endpoint is invalid not allowed', 'utf-8'))
+            self.wfile.write(bytes('403: Requested endpoint is invalid or not allowed', 'utf-8'))
 
     
     # Handle POST requests    
@@ -85,7 +85,7 @@ class Forwarder(BaseHTTPRequestHandler):
     
     # Takes a full URL path with query string and parses it into a path and a dict of queries
     # Example: /this/is/a/path?key=value => ('/this/is/a/path', {'key': 'value'})
-    def _parsePath(path):
+    def _parsePath(self, path):
         if '?' in path:
             pathOnly, queryString = path.split('?', 1)
         else:
@@ -101,33 +101,34 @@ class Forwarder(BaseHTTPRequestHandler):
         
         queries = {}
         for pair in queryPairs:
-            key, value = pair.split('=')
-            queries[key] = value
+            if '=' in pair:
+                key, value = pair.split('=')
+                queries[key] = value
 
         return (pathOnly, queries)
 
     
     # Takes a URL path and determines if it is a valid and allowable API call.
     # Returns either the input path or None
-    def _filterPath(path, POST=False):
+    def _filterPath(self, path):
         path = path.strip('/')
 
-        # Single command, no parameters
-        match = re.fullmatch('api/(\S[^\/]+)')
+        # Single action, no parameters
+        match = re.fullmatch('api/(\S[^\/]+)', path)
         if match:
-            command = match.groups()[0]
-            if _isCommandAllowed(command):
+            action = match.groups()[0]
+            if self._isActionAllowed(action):
                 return path
             else:
                 return None
 
-        # Single command, single parameter
-        match = re.fullmatch('api/(\S[^\/]+/)(\S[^\/]+)')
+        # Single action, single parameter
+        match = re.fullmatch('api/(\S[^\/]+/)(\S[^\/]+)', path)
         if match:
-            command, target = match.groups()
-            if _isCommandAllowed(command):
-                if command in ['states', 'camera_proxy', 'calendars']:
-                    if _isEntityAllowed(target):
+            action, target = match.groups()
+            if self._isActionAllowed(action):
+                if action in ['states/', 'camera_proxy/', 'calendars/']:
+                    if self._isEntityAllowed(target):
                         return path
                     else:
                         return None
@@ -137,43 +138,43 @@ class Forwarder(BaseHTTPRequestHandler):
                 return None
 
         # Services
-        match = re.fullmatch('api/services/(\S[^\/]+)/(\S[^\/]+)')
-        if match and _isCommandAllowed('services/'):
+        match = re.fullmatch('api/services/(\S[^\/]+)/(\S[^\/]+)', path)
+        if match and self._isActionAllowed('services/'):
             domain, service = match.groups()
-            if _isDomainAllowed(domain) and _isServiceAllowed(service):
+            if self._isDomainAllowed(domain) and self._isServiceAllowed(service):
                 return path
             else:
                 return None
 
         # History
-        match = re.fullmatch('api/history/period/(\S[^\/]+)')
-        if match and _isCommandAllowed('history/'):
+        match = re.fullmatch('api/history/period/(\S[^\/]+)', path)
+        if match and self._isActionAllowed('history/'):
             return path
 
         # Check config
-        if path == 'api/config/core/check_config' and _isCommandAllowed('config/'):
+        if path == 'api/config/core/check_config' and self._isActionAllowed('config/'):
             return path
 
         # Handle intent
-        if path == 'api/intent/handle' and _isCommandAllowed('intent/'):
+        if path == 'api/intent/handle' and self._isActionAllowed('intent/'):
             return path
 
         # Blank API call
         if path == 'api':
-            return path
+            return 'api/'
 
         return None
 
     
-    def _isCommandAllowed(command):
-        if blacklist_commands ^ (command in command_list):
+    def _isActionAllowed(self, action):
+        if blacklist_actions ^ (action in action_list):
             return True
         else:
-            print(f'Command not allowed: {command}')
+            print(f'Action not allowed: {action}')
             return False
 
     
-    def _isDomainAllowed(domain):
+    def _isDomainAllowed(self, domain):
         if blacklist_domains ^ (domain in domain_list):
             return True
         else:
@@ -181,9 +182,9 @@ class Forwarder(BaseHTTPRequestHandler):
             return False
 
     
-    def _isEntityAllowed(entity_id):
-        if _isDomainAllowed(entity_id.split('.', 1)[0]):
-            if blacklist_entities ^ (entity_id in [entity_list]):
+    def _isEntityAllowed(self, entity_id):
+        if self._isDomainAllowed(entity_id.split('.', 1)[0]):
+            if blacklist_entities ^ (entity_id in entity_list):
                 return True
             else:
                 print(f'Entity not allowed: {entity_id}')
@@ -191,18 +192,21 @@ class Forwarder(BaseHTTPRequestHandler):
 
     
     # Stub: service filtering not implemented
-    def _isServiceAllowed(service):
+    def _isServiceAllowed(self, service):
         return True
 
     
     # Builds the necessary headers for HA, given the query dict containing the token
-    def _makeHeaders(queries):
+    def _makeHeaders(self, queries):
         if 'token' in queries:
-            token = queries[token]
+            token = queries['token']
         else:
             token = hass_token
         
-        return {'Authorization': 'Bearer '+token, 'Content-Type': 'application/json'}
+        if token is not None:
+            return {'Authorization': 'Bearer '+token, 'Content-Type': 'application/json'}
+        else:
+            return None
 
 
 if __name__ == "__main__":        
