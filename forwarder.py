@@ -9,6 +9,11 @@ bind_port = 8123
 hass_ip = "192.168.2.8"     # Address and port of Home Assistant server
 hass_port = 8123
 
+# Long Lived Access Token for Home Assistant.
+# Overridden by 'token' key in URL query string.
+# Can be left as None if token will be sent in query string.
+hass_token = None
+
 # Blacklist/whitelists for commands, domains and entities.
 # A '/' after a command indicates the command has parameters.
 blacklist_commands = False
@@ -193,10 +198,11 @@ class Forwarder(BaseHTTPRequestHandler):
     # Builds the necessary headers for HA, given the query dict containing the token
     def _makeHeaders(queries):
         if 'token' in queries:
-            headers = {'Authorization': 'Bearer '+queries['token'], 'Content-Type': 'application/json'}
-            return headers
+            token = queries[token]
         else:
-            return None
+            token = hass_token
+        
+        return {'Authorization': 'Bearer '+token, 'Content-Type': 'application/json'}
 
 
 if __name__ == "__main__":        
