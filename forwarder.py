@@ -62,7 +62,7 @@ class Forwarder(BaseHTTPRequestHandler):
     def do_POST(self):
         # Parse and filter request
         path, queries = self._parsePath(self.path)
-        headers = _makeHeaders(queries)
+        headers = self._makeHeaders(queries)
         final_path = self._filterPath(path)
         dataLength = int(self.headers.get('Content-Length'))
         data = self.rfile.read(dataLength)
