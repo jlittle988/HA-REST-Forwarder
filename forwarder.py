@@ -3,7 +3,7 @@ import requests, time, re
 
 # https://developers.home-assistant.io/docs/api/rest/
 
-bind_ip = "localhost"    # Address and port for this server to bind to
+bind_ip = "192.168.2.26"    # Address and port for this server to bind to
 bind_port = 8123
 
 hass_ip = "192.168.2.8"     # Address and port of Home Assistant server
@@ -55,6 +55,8 @@ class Forwarder(BaseHTTPRequestHandler):
         else:
             # Return filter error to original sender
             self.send_response(403)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
             self.wfile.write(bytes('403: Requested endpoint is invalid or not allowed', 'utf-8'))
 
     
@@ -70,7 +72,7 @@ class Forwarder(BaseHTTPRequestHandler):
         if final_path is not None:
             # Send request to HA and return HA response to original requester
             requestURL = f'http://{hass_ip}:{hass_port}/{final_path}'
-            print(requestURL, headers)
+            print(requestURL, headers, data)
             response = requests.post(requestURL, headers=headers, data=data)
 
             self.send_response(response.status_code)
@@ -80,6 +82,8 @@ class Forwarder(BaseHTTPRequestHandler):
         else:
             # Return filter error to original sender
             self.send_response(403)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
             self.wfile.write(bytes('Requested endpoint is invalid not allowed', 'utf-8'))
 
     
